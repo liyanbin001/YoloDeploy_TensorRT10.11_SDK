@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <cstdint>
 
 #ifdef YOLODEPLOYNATIVE_EXPORTS
@@ -81,6 +81,14 @@ struct YoloSegDetection
     int32_t maskId;
 };
 
+
+enum YoloPixelFormat : int32_t
+{
+    YoloPixelFormat_Bgra32 = 0,
+    YoloPixelFormat_Bgr24 = 1,
+    YoloPixelFormat_Rgb24 = 2,
+    YoloPixelFormat_Gray8 = 3
+};
 YOLO_API void* __cdecl YoloCreate(
     const wchar_t* enginePath,
     int32_t dynamicInputWidth,
@@ -103,6 +111,60 @@ YOLO_API int32_t __cdecl YoloGetModelInfo(
     wchar_t* infoBuffer,
     int32_t infoCapacity);
 
+
+// Generic image-memory inference APIs.
+// CPU performs LetterBox/color conversion/normalization/NCHW directly
+// into a persistent cudaHostAlloc() TensorRT host input buffer.
+// No custom CUDA preprocessing kernel is used.
+YOLO_API int32_t __cdecl YoloDetectImage(
+    void* handle,
+    const uint8_t* pixels,
+    int32_t width,
+    int32_t height,
+    int32_t stride,
+    int32_t pixelFormat,
+    float confidenceThreshold,
+    float nmsThreshold,
+    YoloDetection* results,
+    int32_t resultCapacity,
+    float* inferenceMilliseconds,
+    wchar_t* errorBuffer,
+    int32_t errorCapacity);
+
+YOLO_API int32_t __cdecl YoloDetectObbImage(
+    void* handle,
+    const uint8_t* pixels,
+    int32_t width,
+    int32_t height,
+    int32_t stride,
+    int32_t pixelFormat,
+    float confidenceThreshold,
+    float nmsThreshold,
+    int32_t expectedClassCount,
+    YoloObbDetection* results,
+    int32_t resultCapacity,
+    float* inferenceMilliseconds,
+    wchar_t* errorBuffer,
+    int32_t errorCapacity);
+
+YOLO_API int32_t __cdecl YoloDetectSegImage(
+    void* handle,
+    const uint8_t* pixels,
+    int32_t width,
+    int32_t height,
+    int32_t stride,
+    int32_t pixelFormat,
+    float confidenceThreshold,
+    float nmsThreshold,
+    float maskThreshold,
+    int32_t expectedClassCount,
+    YoloSegDetection* results,
+    int32_t resultCapacity,
+    uint16_t* instanceMask,
+    int32_t maskStride,
+    float* inferenceMilliseconds,
+    wchar_t* errorBuffer,
+    int32_t errorCapacity);
 YOLO_API int32_t __cdecl YoloDetectBgra(
     void* handle,
     const uint8_t* bgra,
@@ -214,3 +276,4 @@ YOLO_API int32_t __cdecl YoloBuildEngineFromOnnx(
     int32_t logCapacity,
     wchar_t* errorBuffer,
     int32_t errorCapacity);
+

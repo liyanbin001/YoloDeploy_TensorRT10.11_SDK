@@ -75,6 +75,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="YoloBridge.h" />
+    <ClInclude Include="DetectorCpuPinnedMethods.inl" />
+    <ClInclude Include="YoloCpuPinnedExports.inl" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="YoloBridge.cpp" />
@@ -83,3 +85,4 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
+

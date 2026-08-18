@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,7 +6,7 @@ using System.Text;
 
 namespace YoloDeploy.SDK;
 
-public sealed class YoloDetector : IDisposable
+public sealed partial class YoloDetector : IDisposable
 {
     private readonly object _syncRoot = new();
     private readonly DetectorOptionsBase _options;
@@ -196,11 +196,9 @@ public sealed class YoloDetector : IDisposable
 
 
     /// <summary>
-    /// Detect an industrial-camera frame already available in managed memory.
-    /// No file is written or decoded.
-    ///
-    /// BGRA32 is passed directly to the existing native inference API.
-    /// BGR24/RGB24/Gray8 are converted in memory to a pooled BGRA buffer.
+    /// Detect an industrial-camera frame directly from managed memory.
+    /// BGR/RGB/Gray/BGRA are preprocessed in Native directly into the
+    /// persistent pinned TensorRT input buffer.
     /// </summary>
     public YoloDetectionResponse DetectFrame(
         byte[] pixels,
@@ -213,89 +211,21 @@ public sealed class YoloDetector : IDisposable
         float? maskThreshold = null,
         string sourceName = "camera://managed")
     {
-        ThrowIfDisposed();
-
-        float confidence =
-            confidenceThreshold ?? _options.ConfidenceThreshold;
-
-        float nms =
-            nmsThreshold ?? _options.NmsThreshold;
-
-        float mask =
-            maskThreshold ?? _options.MaskThreshold;
-
-        EngineProvider.ValidateThreshold(
-            confidence,
-            nameof(confidenceThreshold));
-
-        EngineProvider.ValidateThreshold(
-            nms,
-            nameof(nmsThreshold));
-
-        EngineProvider.ValidateThreshold(
-            mask,
-            nameof(maskThreshold));
-
-        using PreparedBgraFrame prepared =
-            CameraFrameConverter.Prepare(
-                pixels,
-                width,
-                height,
-                stride,
-                pixelFormat);
-
-        var image = new BgraImage(
-            prepared.Buffer,
-            prepared.Width,
-            prepared.Height,
-            prepared.Stride);
-
-        string source =
-            string.IsNullOrWhiteSpace(sourceName)
-                ? "camera://managed"
-                : sourceName;
-
-        lock (_syncRoot)
-        {
-            ThrowIfDisposed();
-
-            return Task switch
-            {
-                YoloTask.Detect =>
-                    DetectAxisAligned(
-                        image,
-                        source,
-                        confidence,
-                        nms),
-
-                YoloTask.Obb =>
-                    DetectObb(
-                        image,
-                        source,
-                        confidence,
-                        nms),
-
-                YoloTask.Seg =>
-                    DetectSeg(
-                        image,
-                        source,
-                        confidence,
-                        nms,
-                        mask),
-
-                _ =>
-                    throw new YoloSdkException(
-                        "Detector task is unknown.")
-            };
-        }
+        return DetectFramePinned(
+            pixels,
+            width,
+            height,
+            stride,
+            pixelFormat,
+            confidenceThreshold,
+            nmsThreshold,
+            maskThreshold,
+            sourceName);
     }
 
     /// <summary>
-    /// Detect a BGRA32 industrial-camera frame in unmanaged memory.
-    ///
-    /// The SDK does not copy the input frame before calling YoloDeploy.Native.
-    /// The caller MUST keep the camera buffer valid until this synchronous
-    /// method returns. Do not requeue/release the vendor frame buffer earlier.
+    /// Backward-compatible unmanaged BGRA32 camera API.
+    /// The camera buffer must remain valid until this synchronous call returns.
     /// </summary>
     public YoloDetectionResponse DetectFrame(
         IntPtr bgra,
@@ -307,82 +237,16 @@ public sealed class YoloDetector : IDisposable
         float? maskThreshold = null,
         string sourceName = "camera://native")
     {
-        ThrowIfDisposed();
-
-        CameraFrameConverter.ValidatePointerFrame(
+        return DetectFramePinned(
             bgra,
             width,
             height,
-            stride);
-
-        float confidence =
-            confidenceThreshold ?? _options.ConfidenceThreshold;
-
-        float nms =
-            nmsThreshold ?? _options.NmsThreshold;
-
-        float mask =
-            maskThreshold ?? _options.MaskThreshold;
-
-        EngineProvider.ValidateThreshold(
-            confidence,
-            nameof(confidenceThreshold));
-
-        EngineProvider.ValidateThreshold(
-            nms,
-            nameof(nmsThreshold));
-
-        EngineProvider.ValidateThreshold(
-            mask,
-            nameof(maskThreshold));
-
-        string source =
-            string.IsNullOrWhiteSpace(sourceName)
-                ? "camera://native"
-                : sourceName;
-
-        lock (_syncRoot)
-        {
-            ThrowIfDisposed();
-
-            return Task switch
-            {
-                YoloTask.Detect =>
-                    DetectAxisAlignedPointer(
-                        bgra,
-                        width,
-                        height,
-                        stride,
-                        source,
-                        confidence,
-                        nms),
-
-                YoloTask.Obb =>
-                    DetectObbPointer(
-                        bgra,
-                        width,
-                        height,
-                        stride,
-                        source,
-                        confidence,
-                        nms),
-
-                YoloTask.Seg =>
-                    DetectSegPointer(
-                        bgra,
-                        width,
-                        height,
-                        stride,
-                        source,
-                        confidence,
-                        nms,
-                        mask),
-
-                _ =>
-                    throw new YoloSdkException(
-                        "Detector task is unknown.")
-            };
-        }
+            stride,
+            CameraPixelFormat.Bgra32,
+            confidenceThreshold,
+            nmsThreshold,
+            maskThreshold,
+            sourceName);
     }
 
     public YoloDetectionResponse Detect(
@@ -910,3 +774,5 @@ public sealed class YoloDetector : IDisposable
         GC.SuppressFinalize(this);
     }
 }
+
+

@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 
 namespace YoloDeploy.SDK;
 
-public sealed class ObbDetector : IDisposable
+public sealed partial class ObbDetector : IDisposable
 {
     private readonly YoloDetector _inner;
 
@@ -90,3 +90,4 @@ public sealed class ObbDetector : IDisposable
 
     public void Dispose() => _inner.Dispose();
 }
+

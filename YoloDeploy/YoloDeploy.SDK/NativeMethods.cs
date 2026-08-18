@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace YoloDeploy.SDK;
 
-internal static class NativeMethods
+internal static partial class NativeMethods
 {
     private const string DllName = "YoloDeploy.Native.dll";
 
@@ -222,3 +222,4 @@ internal static class NativeMethods
         StringBuilder errorBuffer,
         int errorCapacity);
 }
+

@@ -1,4 +1,4 @@
-﻿#include "YoloBridge.h"
+#include "YoloBridge.h"
 
 #include <NvInfer.h>
 #include <NvInferPlugin.h>
@@ -19,6 +19,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 #define NOMINMAX
 #include <windows.h>
@@ -69,6 +70,22 @@ namespace
         DeviceBuffer& operator=(const DeviceBuffer&) = delete;
     };
 
+
+    struct PinnedHostBuffer
+    {
+        void* ptr = nullptr;
+        size_t bytes = 0;
+
+        ~PinnedHostBuffer()
+        {
+            if (ptr)
+                cudaFreeHost(ptr);
+        }
+
+        PinnedHostBuffer() = default;
+        PinnedHostBuffer(const PinnedHostBuffer&) = delete;
+        PinnedHostBuffer& operator=(const PinnedHostBuffer&) = delete;
+    };
     struct StreamHolder
     {
         cudaStream_t stream = nullptr;
@@ -1073,6 +1090,7 @@ namespace
         int inputH = 0;
 
         DeviceBuffer inputDevice;
+        PinnedHostBuffer inputHost;
         DeviceBuffer outputDevice;
         DeviceBuffer protoDevice;
 
@@ -1368,6 +1386,16 @@ namespace
                     &inputDevice.ptr,
                     inputDevice.bytes),
                 "cudaMalloc(input)");
+            inputHost.bytes =
+                inputDevice.bytes;
+
+            checkCuda(
+                cudaHostAlloc(
+                    &inputHost.ptr,
+                    inputHost.bytes,
+                    cudaHostAllocDefault),
+                "cudaHostAlloc(input host)");
+
 
             checkCuda(
                 cudaMalloc(
@@ -1450,7 +1478,7 @@ namespace
             }
 
             info
-                << "\nPreprocess: LetterBox + RGB + /255 + NCHW"
+                << "\nPreprocess: CPU LetterBox/Color/NCHW -> persistent pinned host tensor -> cudaMemcpyAsync"
                 << "\nPostprocess: Detect / OBB / YOLO26-Seg selected by task";
 
             modelInfo =
@@ -2575,6 +2603,8 @@ namespace
             return results;
         }
 
+        #include "DetectorCpuPinnedMethods.inl"
+
         std::vector<YoloSegDetection> detectSeg(
             const uint8_t* bgra,
             int width,
@@ -3088,6 +3118,8 @@ int32_t __cdecl YoloGetModelInfo(
     return static_cast<int32_t>(detector->modelInfo.size());
 }
 
+#include "YoloCpuPinnedExports.inl"
+
 int32_t __cdecl YoloDetectBgra(
     void* handle,
     const uint8_t* bgra,
@@ -3102,53 +3134,21 @@ int32_t __cdecl YoloDetectBgra(
     wchar_t* errorBuffer,
     int32_t errorCapacity)
 {
-    try
-    {
-        if (!handle)
-            throw std::runtime_error("Detector handle is null.");
-        if (!bgra)
-            throw std::runtime_error("Image data is null.");
-        if (!results || resultCapacity <= 0)
-            throw std::runtime_error("Detection result buffer is invalid.");
-
-        confidenceThreshold = clampf(confidenceThreshold, 0.0f, 1.0f);
-        nmsThreshold = clampf(nmsThreshold, 0.0f, 1.0f);
-
-        auto* detector = static_cast<Detector*>(handle);
-        float ms = 0.0f;
-        auto detections = detector->detect(
-            bgra, width, height, stride,
-            confidenceThreshold, nmsThreshold, ms);
-
-        if (inferenceMilliseconds)
-            *inferenceMilliseconds = ms;
-
-        int32_t count = static_cast<int32_t>(
-            std::min<size_t>(detections.size(), static_cast<size_t>(resultCapacity)));
-
-        for (int32_t i = 0; i < count; ++i)
-        {
-            const auto& d = detections[static_cast<size_t>(i)];
-            results[i] = YoloDetection{
-                d.x1, d.y1, d.x2, d.y2, d.score, d.classId
-            };
-        }
-
-        setError(L"", errorBuffer, errorCapacity);
-        return count;
-    }
-    catch (const std::exception& ex)
-    {
-        setError(widen(ex.what()), errorBuffer, errorCapacity);
-        return -1;
-    }
-    catch (...)
-    {
-        setError(L"Unknown inference error.", errorBuffer, errorCapacity);
-        return -1;
-    }
+    return YoloDetectImage(
+        handle,
+        bgra,
+        width,
+        height,
+        stride,
+        YoloPixelFormat_Bgra32,
+        confidenceThreshold,
+        nmsThreshold,
+        results,
+        resultCapacity,
+        inferenceMilliseconds,
+        errorBuffer,
+        errorCapacity);
 }
-
 
 int32_t __cdecl YoloDetectObbBgra(
     void* handle,
@@ -3165,111 +3165,22 @@ int32_t __cdecl YoloDetectObbBgra(
     wchar_t* errorBuffer,
     int32_t errorCapacity)
 {
-    try
-    {
-        if (!handle)
-            throw std::runtime_error("Detector handle is null.");
-
-        if (!bgra)
-            throw std::runtime_error("Image data is null.");
-
-        if (!results || resultCapacity <= 0)
-            throw std::runtime_error("OBB result buffer is invalid.");
-
-        confidenceThreshold =
-            clampf(
-                confidenceThreshold,
-                0.0f,
-                1.0f);
-
-        nmsThreshold =
-            clampf(
-                nmsThreshold,
-                0.0f,
-                1.0f);
-
-        auto* detector =
-            static_cast<Detector*>(handle);
-
-        float ms = 0.0f;
-
-        auto detections =
-            detector->detectObb(
-                bgra,
-                width,
-                height,
-                stride,
-                confidenceThreshold,
-                nmsThreshold,
-                expectedClassCount,
-                ms);
-
-        if (inferenceMilliseconds)
-            *inferenceMilliseconds = ms;
-
-        const int32_t count =
-            static_cast<int32_t>(
-                std::min<size_t>(
-                    detections.size(),
-                    static_cast<size_t>(
-                        resultCapacity)));
-
-        for (int32_t i = 0; i < count; ++i)
-        {
-            const auto& d =
-                detections[
-                    static_cast<size_t>(i)];
-
-            const ObbCorners corners =
-                obbToCorners(d);
-
-            results[i] =
-                YoloObbDetection{
-                    d.centerX,
-                    d.centerY,
-                    d.width,
-                    d.height,
-                    d.angle,
-                    d.score,
-                    d.classId,
-                    corners.p1x,
-                    corners.p1y,
-                    corners.p2x,
-                    corners.p2y,
-                    corners.p3x,
-                    corners.p3y,
-                    corners.p4x,
-                    corners.p4y
-                };
-        }
-
-        setError(
-            L"",
-            errorBuffer,
-            errorCapacity);
-
-        return count;
-    }
-    catch (const std::exception& ex)
-    {
-        setError(
-            widen(ex.what()),
-            errorBuffer,
-            errorCapacity);
-
-        return -1;
-    }
-    catch (...)
-    {
-        setError(
-            L"Unknown OBB inference error.",
-            errorBuffer,
-            errorCapacity);
-
-        return -1;
-    }
+    return YoloDetectObbImage(
+        handle,
+        bgra,
+        width,
+        height,
+        stride,
+        YoloPixelFormat_Bgra32,
+        confidenceThreshold,
+        nmsThreshold,
+        expectedClassCount,
+        results,
+        resultCapacity,
+        inferenceMilliseconds,
+        errorBuffer,
+        errorCapacity);
 }
-
 
 int32_t __cdecl YoloDetectSegBgra(
     void* handle,
@@ -3289,123 +3200,28 @@ int32_t __cdecl YoloDetectSegBgra(
     wchar_t* errorBuffer,
     int32_t errorCapacity)
 {
-    try
-    {
-        if (!handle)
-        {
-            throw std::runtime_error(
-                "Detector handle is null.");
-        }
-
-        if (!bgra)
-        {
-            throw std::runtime_error(
-                "Image data is null.");
-        }
-
-        if (!results ||
-            resultCapacity <= 0)
-        {
-            throw std::runtime_error(
-                "Segmentation result buffer is invalid.");
-        }
-
-        if (!instanceMask ||
-            maskStride < width)
-        {
-            throw std::runtime_error(
-                "Segmentation instance mask buffer/stride is invalid.");
-        }
-
-        confidenceThreshold =
-            clampf(
-                confidenceThreshold,
-                0.0f,
-                1.0f);
-
-        nmsThreshold =
-            clampf(
-                nmsThreshold,
-                0.0f,
-                1.0f);
-
-        maskThreshold =
-            clampf(
-                maskThreshold,
-                0.001f,
-                0.999f);
-
-        auto* detector =
-            static_cast<Detector*>(
-                handle);
-
-        float ms = 0.0f;
-
-        auto detections =
-            detector->detectSeg(
-                bgra,
-                width,
-                height,
-                stride,
-                confidenceThreshold,
-                nmsThreshold,
-                maskThreshold,
-                expectedClassCount,
-                instanceMask,
-                maskStride,
-                resultCapacity,
-                ms);
-
-        if (inferenceMilliseconds)
-        {
-            *inferenceMilliseconds =
-                ms;
-        }
-
-        const int32_t count =
-            static_cast<int32_t>(
-                std::min<size_t>(
-                    detections.size(),
-                    static_cast<size_t>(
-                        resultCapacity)));
-
-        for (int32_t i = 0;
-             i < count;
-             ++i)
-        {
-            results[i] =
-                detections[
-                    static_cast<size_t>(i)];
-        }
-
-        setError(
-            L"",
-            errorBuffer,
-            errorCapacity);
-
-        return count;
-    }
-    catch (const std::exception& ex)
-    {
-        setError(
-            widen(ex.what()),
-            errorBuffer,
-            errorCapacity);
-
-        return -1;
-    }
-    catch (...)
-    {
-        setError(
-            L"Unknown segmentation inference error.",
-            errorBuffer,
-            errorCapacity);
-
-        return -1;
-    }
+    return YoloDetectSegImage(
+        handle,
+        bgra,
+        width,
+        height,
+        stride,
+        YoloPixelFormat_Bgra32,
+        confidenceThreshold,
+        nmsThreshold,
+        maskThreshold,
+        expectedClassCount,
+        results,
+        resultCapacity,
+        instanceMask,
+        maskStride,
+        inferenceMilliseconds,
+        errorBuffer,
+        errorCapacity);
 }
 
 void __cdecl YoloDestroy(void* handle)
 {
     delete static_cast<Detector*>(handle);
 }
+
