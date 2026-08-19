@@ -1,0 +1,12 @@
+﻿推荐模型交付：
+
+best.onnx
+classes.names
+
+不要跨不同 GPU 直接分发开发电脑生成的 .engine。
+
+首次运行：
+ONNX -> 当前目标机 GPU TensorRT Engine -> Cache -> 推理
+
+缓存：
+%LOCALAPPDATA%\YoloDeploy\EngineCache
