@@ -1,4 +1,4 @@
-﻿#include "YoloBridge.h"
+#include "YoloBridge.h"
 
 #include <NvInfer.h>
 #include <NvOnnxParser.h>
@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #define NOMINMAX
 #include <windows.h>
@@ -133,6 +134,51 @@ namespace
             _TRUNCATE);
     }
 
+    // Windows Unicode-safe ONNX file loading.
+    //
+    // The exported API receives wchar_t*. std::filesystem::path therefore
+    // keeps the original UTF-16 path, including Chinese directory/file names.
+    // We read the ONNX ourselves and give serialized bytes to TensorRT,
+    // instead of asking parseFromFile(char*) to reopen a narrow path.
+    static std::vector<char> readOnnxBytes(
+        const std::filesystem::path& path)
+    {
+        std::ifstream file(
+            path,
+            std::ios::binary | std::ios::ate);
+
+        if (!file)
+        {
+            throw std::runtime_error(
+                "Cannot open ONNX file.");
+        }
+
+        const std::streamsize size =
+            file.tellg();
+
+        if (size <= 0)
+        {
+            throw std::runtime_error(
+                "ONNX file is empty.");
+        }
+
+        file.seekg(
+            0,
+            std::ios::beg);
+
+        std::vector<char> bytes(
+            static_cast<size_t>(size));
+
+        if (!file.read(
+                bytes.data(),
+                size))
+        {
+            throw std::runtime_error(
+                "Failed to read ONNX file.");
+        }
+
+        return bytes;
+    }
     static std::string dimsToString(const nvinfer1::Dims& dims)
     {
         std::ostringstream oss;
@@ -305,13 +351,25 @@ int32_t __cdecl YoloBuildEngineFromOnnx(
             throw std::runtime_error(
                 "nvonnxparser::createParser failed.");
 
-        const std::string onnxUtf8 =
-            narrowUtf8(onnxFile.wstring());
+        // Avoid parseFromFile(char*) on Windows for Unicode paths.
+        // Read through std::filesystem::path (UTF-16) and parse the serialized
+        // ONNX directly from memory.
+        const std::vector<char> onnxBytes =
+            readOnnxBytes(onnxFile);
 
-        const bool parsed = parser->parseFromFile(
-            onnxUtf8.c_str(),
-            static_cast<int32_t>(
-                nvinfer1::ILogger::Severity::kWARNING));
+        report
+            << "ONNX load mode: Unicode filesystem path -> memory buffer\n";
+
+        report
+            << "ONNX bytes: "
+            << onnxBytes.size()
+            << "\n";
+
+        const bool parsed =
+            parser->parse(
+                onnxBytes.data(),
+                onnxBytes.size(),
+                nullptr);
 
         const std::string parserMessages =
             collectParserErrors(*parser);
@@ -621,3 +679,4 @@ int32_t __cdecl YoloBuildEngineFromOnnx(
         return -1;
     }
 }
+

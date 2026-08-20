@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -81,10 +81,27 @@ internal static class EngineCacheManager
         int inputHeight,
         int workspaceMiB)
     {
-        Directory.CreateDirectory(CacheRoot);
+        string fullOnnxPath =
+            Path.GetFullPath(onnxPath);
+
+        string? modelDirectory =
+            Path.GetDirectoryName(fullOnnxPath);
+
+        if (string.IsNullOrWhiteSpace(modelDirectory))
+        {
+            throw new YoloSdkException(
+                "无法确定 ONNX 所在目录。");
+        }
+
+        if (!Directory.Exists(modelDirectory))
+        {
+            throw new DirectoryNotFoundException(
+                $"ONNX 所在目录不存在：{modelDirectory}");
+        }
 
         string stem =
-            SanitizeToken(Path.GetFileNameWithoutExtension(onnxPath));
+            SanitizeToken(
+                Path.GetFileNameWithoutExtension(fullOnnxPath));
 
         string gpuToken =
             SanitizeToken(gpu.Name);
@@ -102,12 +119,16 @@ internal static class EngineCacheManager
             + $"trt{gpu.TensorRtMajor}_{gpu.TensorRtMinor}_{gpu.TensorRtPatch}_{gpu.TensorRtBuild}_"
             + $"{precisionToken}_{inputWidth}x{inputHeight}_ws{workspaceMiB}";
 
+        // Keep the GPU/config fingerprint in the file name, but store the
+        // generated Engine beside the source ONNX file.
         string enginePath =
-            Path.Combine(CacheRoot, cacheKey + ".engine");
+            Path.Combine(
+                modelDirectory,
+                cacheKey + ".engine");
 
         return new EngineCacheDescriptor
         {
-            OnnxPath = Path.GetFullPath(onnxPath),
+            OnnxPath = fullOnnxPath,
             OnnxSha256 = onnxSha256,
             Precision = precision.ToUpperInvariant(),
             InputWidth = inputWidth,
@@ -300,3 +321,4 @@ internal static class EngineCacheManager
             : sanitized[..48];
     }
 }
+

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -112,12 +112,33 @@ namespace YoloDeploy.SDK
             int inputHeight,
             int workspaceMiB)
         {
-            Directory.CreateDirectory(CacheRoot);
+            string fullOnnxPath =
+                Path.GetFullPath(
+                    onnxPath);
+
+            string modelDirectory =
+                Path.GetDirectoryName(
+                    fullOnnxPath);
+
+            if (string.IsNullOrWhiteSpace(
+                    modelDirectory))
+            {
+                throw new YoloSdkException(
+                    "无法确定 ONNX 所在目录。");
+            }
+
+            if (!Directory.Exists(
+                    modelDirectory))
+            {
+                throw new DirectoryNotFoundException(
+                    "ONNX 所在目录不存在："
+                    + modelDirectory);
+            }
 
             string stem =
                 SanitizeToken(
                     Path.GetFileNameWithoutExtension(
-                        onnxPath));
+                        fullOnnxPath));
 
             string gpuToken =
                 SanitizeToken(gpu.Name);
@@ -154,15 +175,16 @@ namespace YoloDeploy.SDK
                 + inputWidth + "x" + inputHeight
                 + "_ws" + workspaceMiB;
 
+            // Keep GPU/config-specific Engine names but place them beside ONNX.
             string enginePath =
                 Path.Combine(
-                    CacheRoot,
+                    modelDirectory,
                     cacheKey + ".engine");
 
             return new EngineCacheDescriptor
             {
                 OnnxPath =
-                    Path.GetFullPath(onnxPath),
+                    fullOnnxPath,
 
                 OnnxSha256 =
                     onnxSha256,
@@ -432,3 +454,4 @@ namespace YoloDeploy.SDK
         }
     }
 }
+
