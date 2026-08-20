@@ -88,13 +88,25 @@ internal static class EngineCacheManager
             WriteIndented = true
         };
 
-    internal static string CacheRoot { get; } =
-        Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.LocalApplicationData),
-            "YoloDeploy",
-            "EngineCache");
+    internal static string? GetModelDirectory(
+        string? onnxPath)
+    {
+        if (string.IsNullOrWhiteSpace(onnxPath))
+            return null;
 
+        try
+        {
+            string fullOnnxPath =
+                Path.GetFullPath(onnxPath);
+
+            return Path.GetDirectoryName(
+                fullOnnxPath);
+        }
+        catch
+        {
+            return null;
+        }
+    }
     internal static async Task<string> ComputeSha256Async(
         string filePath)
     {
@@ -120,12 +132,31 @@ internal static class EngineCacheManager
         int inputHeight,
         int workspaceMiB)
     {
-        Directory.CreateDirectory(CacheRoot);
+        string fullOnnxPath =
+            Path.GetFullPath(onnxPath);
+
+        string? modelDirectory =
+            Path.GetDirectoryName(
+                fullOnnxPath);
+
+        if (string.IsNullOrWhiteSpace(
+                modelDirectory))
+        {
+            throw new InvalidOperationException(
+                "无法确定 ONNX 所在目录。");
+        }
+
+        if (!Directory.Exists(
+                modelDirectory))
+        {
+            throw new DirectoryNotFoundException(
+                $"ONNX 所在目录不存在：{modelDirectory}");
+        }
 
         string stem =
             SanitizeToken(
                 Path.GetFileNameWithoutExtension(
-                    onnxPath));
+                    fullOnnxPath));
 
         string gpuToken =
             SanitizeToken(gpu.Name);
@@ -151,15 +182,17 @@ internal static class EngineCacheManager
             + $"{inputWidth}x{inputHeight}_"
             + $"ws{workspaceMiB}";
 
+        // Engine and metadata are intentionally stored beside the ONNX.
+        // This keeps WPF, .NET 8 SDK and Net48 SDK on the same cache policy.
         string enginePath =
             Path.Combine(
-                CacheRoot,
+                modelDirectory,
                 cacheKey + ".engine");
 
         return new EngineCacheDescriptor
         {
             OnnxPath =
-                Path.GetFullPath(onnxPath),
+                fullOnnxPath,
 
             OnnxSha256 =
                 onnxSha256,
@@ -451,17 +484,32 @@ internal static class EngineCacheManager
             Encoding.UTF8);
     }
 
-    internal static EngineCacheStats GetStats()
+    internal static EngineCacheStats GetStats(
+        string? onnxPath)
     {
-        Directory.CreateDirectory(
-            CacheRoot);
+        string? modelDirectory =
+            GetModelDirectory(onnxPath);
+
+        if (string.IsNullOrWhiteSpace(
+                modelDirectory) ||
+            !Directory.Exists(
+                modelDirectory))
+        {
+            return new EngineCacheStats(
+                0,
+                0);
+        }
 
         FileInfo[] engines =
             new DirectoryInfo(
-                CacheRoot)
+                modelDirectory)
             .GetFiles(
                 "*.engine",
-                SearchOption.TopDirectoryOnly);
+                SearchOption.TopDirectoryOnly)
+            .Where(
+                x => File.Exists(
+                    x.FullName + ".json"))
+            .ToArray();
 
         return new EngineCacheStats(
             engines.Length,
@@ -469,24 +517,58 @@ internal static class EngineCacheManager
                 x => x.Length));
     }
 
-    internal static void ClearAll()
+    internal static void ClearAll(
+        string? onnxPath)
     {
-        if (Directory.Exists(
-                CacheRoot))
+        string? modelDirectory =
+            GetModelDirectory(onnxPath);
+
+        if (string.IsNullOrWhiteSpace(
+                modelDirectory) ||
+            !Directory.Exists(
+                modelDirectory))
         {
-            Directory.Delete(
-                CacheRoot,
-                recursive: true);
+            throw new InvalidOperationException(
+                "请先选择有效的 ONNX 模型。");
         }
 
-        Directory.CreateDirectory(
-            CacheRoot);
+        FileInfo[] metadataFiles =
+            new DirectoryInfo(
+                modelDirectory)
+            .GetFiles(
+                "*.engine.json",
+                SearchOption.TopDirectoryOnly);
+
+        foreach (FileInfo metadata in
+                 metadataFiles)
+        {
+            string enginePath =
+                metadata.FullName[
+                    ..^".json".Length];
+
+            if (File.Exists(enginePath))
+            {
+                File.Delete(enginePath);
+            }
+
+            metadata.Delete();
+        }
     }
 
-    internal static void OpenCacheFolder()
+    internal static void OpenCacheFolder(
+        string? onnxPath)
     {
-        Directory.CreateDirectory(
-            CacheRoot);
+        string? modelDirectory =
+            GetModelDirectory(onnxPath);
+
+        if (string.IsNullOrWhiteSpace(
+                modelDirectory) ||
+            !Directory.Exists(
+                modelDirectory))
+        {
+            throw new InvalidOperationException(
+                "请先选择有效的 ONNX 模型。");
+        }
 
         Process.Start(
             new ProcessStartInfo
@@ -495,7 +577,7 @@ internal static class EngineCacheManager
                     "explorer.exe",
 
                 Arguments =
-                    $"\"{CacheRoot}\"",
+                    $"\"{modelDirectory}\"",
 
                 UseShellExecute =
                     true
@@ -503,7 +585,8 @@ internal static class EngineCacheManager
     }
 
     internal static bool IsInsideCache(
-        string? path)
+        string? path,
+        string? onnxPath)
     {
         if (string.IsNullOrWhiteSpace(
                 path))
@@ -511,22 +594,35 @@ internal static class EngineCacheManager
             return false;
         }
 
-        string cache =
-            Path.GetFullPath(
-                CacheRoot)
-            .TrimEnd(
-                Path.DirectorySeparatorChar,
-                Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
+        string? modelDirectory =
+            GetModelDirectory(onnxPath);
 
-        string target =
-            Path.GetFullPath(path);
+        if (string.IsNullOrWhiteSpace(
+                modelDirectory))
+        {
+            return false;
+        }
 
-        return target.StartsWith(
-            cache,
-            StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            string target =
+                Path.GetFullPath(path);
+
+            string? targetDirectory =
+                Path.GetDirectoryName(target);
+
+            return string.Equals(
+                       targetDirectory,
+                       modelDirectory,
+                       StringComparison.OrdinalIgnoreCase)
+                   && File.Exists(
+                       target + ".json");
+        }
+        catch
+        {
+            return false;
+        }
     }
-
     private static string SanitizeToken(
         string text)
     {

@@ -1,8 +1,7 @@
 ﻿param(
     [string]$Configuration = "Release",
     [string]$RuntimeIdentifier = "win-x64",
-    [string]$PackageName = "YoloDeploy.SDK.Runtime",
-    [switch]$NoZip
+    [string]$PackageName = "YoloDeploy.SDK.Runtime"
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,18 +17,18 @@ $AssetsDir = Join-Path $Root "sdk_runtime_assets"
 $NativeDll = Join-Path $Root "artifacts\native\$Configuration\YoloDeploy.Native.dll"
 
 $DistRoot = Join-Path $Root "dist"
-$StagingRoot = Join-Path $DistRoot "_sdk_runtime_staging"
+$TestPublish = Join-Path $DistRoot "_sdk_test_publish"
 $PackageDir = Join-Path $DistRoot $PackageName
 $ZipPath = Join-Path $DistRoot ($PackageName + ".zip")
 
-function Write-Step([string]$Message) {
+function Step([string]$Text) {
     Write-Host ""
     Write-Host "================================================================" -ForegroundColor Cyan
-    Write-Host $Message -ForegroundColor Cyan
+    Write-Host $Text -ForegroundColor Cyan
     Write-Host "================================================================" -ForegroundColor Cyan
 }
 
-function Require-Path([string]$Path, [string]$Description) {
+function Require([string]$Path, [string]$Description) {
     if (-not (Test-Path $Path)) {
         throw "$Description not found: $Path"
     }
@@ -51,143 +50,80 @@ function Find-MSBuild {
             continue
         }
 
-        $result = & $vswhere `
+        $found = & $vswhere `
             -latest `
             -products * `
             -requires Microsoft.Component.MSBuild `
             -find "MSBuild\**\Bin\MSBuild.exe" |
             Select-Object -First 1
 
-        if ($result -and (Test-Path $result)) {
-            return $result
+        if ($found -and (Test-Path $found)) {
+            return $found
         }
     }
 
-    throw "MSBuild.exe was not found. Install Visual Studio 2022 with Desktop development with C++."
+    throw "MSBuild.exe not found. Install VS2022 Desktop development with C++."
 }
 
-function Find-DotNet {
-    $cmd = Get-Command dotnet.exe -ErrorAction SilentlyContinue
-    if ($cmd) {
-        return $cmd.Source
-    }
-
-    $candidate = Join-Path $env:ProgramFiles "dotnet\dotnet.exe"
-    if (Test-Path $candidate) {
-        return $candidate
-    }
-
-    throw ".NET 8 SDK was not found."
-}
-
-function Copy-UniqueDlls {
+function Copy-DllPatterns {
     param(
-        [Parameter(Mandatory=$true)]
         [string[]]$Directories,
-
-        [Parameter(Mandatory=$true)]
         [string[]]$Patterns,
-
-        [Parameter(Mandatory=$true)]
-        [string]$Destination,
-
-        [Parameter(Mandatory=$true)]
-        [string]$GroupName
+        [string]$Destination
     )
 
-    $copied = @{}
-    $count = 0
+    $seen = @{}
 
-    foreach ($directory in $Directories) {
-        if ([string]::IsNullOrWhiteSpace($directory) -or
-            -not (Test-Path $directory)) {
+    foreach ($dir in $Directories) {
+        if ([string]::IsNullOrWhiteSpace($dir) -or -not (Test-Path $dir)) {
             continue
         }
 
         foreach ($pattern in $Patterns) {
             Get-ChildItem `
-                -Path $directory `
+                -Path $dir `
                 -Filter $pattern `
                 -File `
                 -ErrorAction SilentlyContinue |
             ForEach-Object {
                 $key = $_.Name.ToLowerInvariant()
 
-                if (-not $copied.ContainsKey($key)) {
+                if (-not $seen.ContainsKey($key)) {
                     Copy-Item $_.FullName $Destination -Force
-                    $copied[$key] = $true
-                    $count++
+                    $seen[$key] = $true
                 }
             }
         }
     }
-
-    Write-Host "$GroupName DLLs copied: $count"
-    return $count
 }
 
-function Get-GitCommit {
-    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+Step "1/8 Validate environment"
 
-    if (-not $git) {
-        return ""
-    }
-
-    try {
-        $commit = (& git -C $Root rev-parse HEAD 2>$null).Trim()
-        return $commit
-    }
-    catch {
-        return ""
-    }
-}
-
-function Get-FileSha256([string]$Path) {
-    return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-
-function Require-AnyFile([string]$Directory, [string]$Pattern, [string]$Description) {
-    $item = Get-ChildItem `
-        -Path $Directory `
-        -Filter $Pattern `
-        -File `
-        -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-
-    if (-not $item) {
-        throw "$Description missing in package: $Pattern"
-    }
-
-    return $item
-}
-
-Write-Step "1/10 Validate SDK source and build environment"
-
-Require-Path $NativeProject "Native project"
-Require-Path $SdkProject "YoloDeploy.SDK project"
-Require-Path $TestProject "TestSDK project"
-Require-Path $AssetsDir "SDK runtime assets"
+Require $NativeProject "Native project"
+Require $SdkProject "SDK project"
+Require $TestProject "Test project"
+Require $AssetsDir "Runtime assets"
 
 if ([string]::IsNullOrWhiteSpace($env:TENSORRT_ROOT)) {
-    throw "TENSORRT_ROOT is not set. Example: D:\TensorRT-10.11.0.33"
+    throw "TENSORRT_ROOT is not set."
 }
 
 if ([string]::IsNullOrWhiteSpace($env:CUDA_PATH)) {
-    throw "CUDA_PATH is not set. Example: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3"
+    throw "CUDA_PATH is not set."
 }
 
-Require-Path $env:TENSORRT_ROOT "TENSORRT_ROOT"
-Require-Path $env:CUDA_PATH "CUDA_PATH"
+Require $env:TENSORRT_ROOT "TensorRT root"
+Require $env:CUDA_PATH "CUDA path"
 
 $MSBuild = Find-MSBuild
-$DotNet = Find-DotNet
+$DotNet = (Get-Command dotnet.exe -ErrorAction Stop).Source
 
 Write-Host "MSBuild       : $MSBuild"
 Write-Host "dotnet        : $DotNet"
-Write-Host "TensorRT root : $env:TENSORRT_ROOT"
-Write-Host "CUDA path     : $env:CUDA_PATH"
+Write-Host "TENSORRT_ROOT : $env:TENSORRT_ROOT"
+Write-Host "CUDA_PATH     : $env:CUDA_PATH"
 
-Write-Step "2/10 Build YoloDeploy.Native ($Configuration | x64)"
+Step "2/8 Build Native Release|x64"
 
 & $MSBuild `
     $NativeProject `
@@ -198,13 +134,12 @@ Write-Step "2/10 Build YoloDeploy.Native ($Configuration | x64)"
     "/nologo"
 
 if ($LASTEXITCODE -ne 0) {
-    throw "Native build failed with exit code $LASTEXITCODE."
+    throw "Native build failed."
 }
 
-Require-Path $NativeDll "YoloDeploy.Native.dll"
-Write-Host "Native DLL: $NativeDll"
+Require $NativeDll "YoloDeploy.Native.dll"
 
-Write-Step "3/10 Build YoloDeploy.SDK"
+Step "3/8 Build YoloDeploy.SDK (Detect / OBB / Seg)"
 
 & $DotNet build `
     $SdkProject `
@@ -213,12 +148,10 @@ Write-Step "3/10 Build YoloDeploy.SDK"
     --nologo
 
 if ($LASTEXITCODE -ne 0) {
-    throw "YoloDeploy.SDK build failed with exit code $LASTEXITCODE."
+    throw "SDK build failed."
 }
 
-Write-Step "4/10 Publish TestSDK"
-
-$TestPublish = Join-Path $DistRoot "_sdk_test_publish"
+Step "4/8 Publish TestSDK"
 
 if (Test-Path $TestPublish) {
     Remove-Item $TestPublish -Recurse -Force
@@ -229,85 +162,64 @@ if (Test-Path $TestPublish) {
     -c $Configuration `
     -r $RuntimeIdentifier `
     --self-contained false `
-    --nologo `
     -p:Platform=x64 `
-    -p:PublishSingleFile=false `
-    -o $TestPublish
+    -o $TestPublish `
+    --nologo
 
 if ($LASTEXITCODE -ne 0) {
-    throw "TestSDK publish failed with exit code $LASTEXITCODE."
+    throw "TestSDK publish failed."
 }
 
-Require-Path (Join-Path $TestPublish "TestSDK.exe") "TestSDK.exe"
-Require-Path (Join-Path $TestPublish "YoloDeploy.SDK.dll") "YoloDeploy.SDK.dll"
+Require (Join-Path $TestPublish "YoloDeploy.SDK.dll") "YoloDeploy.SDK.dll"
+Require (Join-Path $TestPublish "TestSDK.exe") "TestSDK.exe"
 
-Write-Step "5/10 Prepare customer package staging"
+Step "5/8 Assemble customer runtime"
 
-if (Test-Path $StagingRoot) {
-    Remove-Item $StagingRoot -Recurse -Force
+if (Test-Path $PackageDir) {
+    Remove-Item $PackageDir -Recurse -Force
 }
 
-New-Item -ItemType Directory -Path $StagingRoot | Out-Null
+New-Item -ItemType Directory -Path $PackageDir | Out-Null
 
-# Managed SDK + TestSDK managed launcher/runtimeconfig.
-# Native runtime will be copied from the development installations below.
-$ManagedAllowList = @(
+foreach ($name in @(
     "YoloDeploy.SDK.dll",
     "YoloDeploy.SDK.xml",
     "TestSDK.exe",
     "TestSDK.dll",
     "TestSDK.deps.json",
     "TestSDK.runtimeconfig.json"
-)
-
-foreach ($name in $ManagedAllowList) {
-    $source = Join-Path $TestPublish $name
-    if (Test-Path $source) {
-        Copy-Item $source $StagingRoot -Force
+)) {
+    $src = Join-Path $TestPublish $name
+    if (Test-Path $src) {
+        Copy-Item $src $PackageDir -Force
     }
 }
 
-Copy-Item $NativeDll $StagingRoot -Force
+Copy-Item $NativeDll $PackageDir -Force
 
 Copy-Item `
     -Path (Join-Path $AssetsDir "*") `
-    -Destination $StagingRoot `
+    -Destination $PackageDir `
     -Recurse `
     -Force
 
-Write-Step "6/10 Collect TensorRT runtime + ONNX parser DLLs"
+Step "6/8 Copy TensorRT / ONNX parser / CUDA user-mode DLLs"
 
-$TrtDirs = @(
-    (Join-Path $env:TENSORRT_ROOT "lib"),
-    (Join-Path $env:TENSORRT_ROOT "bin")
-)
-
-$TrtCopied = Copy-UniqueDlls `
-    -Directories $TrtDirs `
+Copy-DllPatterns `
+    -Directories @(
+        (Join-Path $env:TENSORRT_ROOT "lib"),
+        (Join-Path $env:TENSORRT_ROOT "bin")
+    ) `
     -Patterns @(
         "nvinfer*.dll",
         "nvonnxparser*.dll"
     ) `
-    -Destination $StagingRoot `
-    -GroupName "TensorRT"
+    -Destination $PackageDir
 
-foreach ($required in @(
-    "nvinfer_10.dll",
-    "nvinfer_plugin_10.dll",
-    "nvonnxparser_10.dll"
-)) {
-    Require-Path `
-        (Join-Path $StagingRoot $required) `
-        "Required TensorRT DLL"
-}
-
-Write-Step "7/10 Collect portable CUDA user-mode runtime"
-
-$CudaBin = Join-Path $env:CUDA_PATH "bin"
-Require-Path $CudaBin "CUDA bin directory"
-
-$CudaCopied = Copy-UniqueDlls `
-    -Directories @($CudaBin) `
+Copy-DllPatterns `
+    -Directories @(
+        (Join-Path $env:CUDA_PATH "bin")
+    ) `
     -Patterns @(
         "cudart64_*.dll",
         "cublas64_*.dll",
@@ -317,33 +229,7 @@ $CudaCopied = Copy-UniqueDlls `
         "cufft64_*.dll",
         "curand64_*.dll"
     ) `
-    -Destination $StagingRoot `
-    -GroupName "CUDA"
-
-# Optional cuDNN redistribution, if the Native/TensorRT build in a specific
-# environment needs it and CUDNN_ROOT is configured.
-if (-not [string]::IsNullOrWhiteSpace($env:CUDNN_ROOT) -and
-    (Test-Path $env:CUDNN_ROOT)) {
-
-    $CudnnDirs = @(
-        (Join-Path $env:CUDNN_ROOT "bin"),
-        (Join-Path $env:CUDNN_ROOT "bin\12.0"),
-        (Join-Path $env:CUDNN_ROOT "bin\11.0")
-    )
-
-    [void](Copy-UniqueDlls `
-        -Directories $CudnnDirs `
-        -Patterns @("cudnn*.dll") `
-        -Destination $StagingRoot `
-        -GroupName "cuDNN")
-}
-
-$Cudart = Require-AnyFile `
-    $StagingRoot `
-    "cudart64_*.dll" `
-    "CUDA Runtime"
-
-Write-Step "8/10 Validate final package contents"
+    -Destination $PackageDir
 
 foreach ($required in @(
     "YoloDeploy.SDK.dll",
@@ -353,126 +239,107 @@ foreach ($required in @(
     "nvinfer_10.dll",
     "nvinfer_plugin_10.dll",
     "nvonnxparser_10.dll",
-    "verify_runtime.bat",
-    "README_CUSTOMER_CN.txt"
+    "README_CUSTOMER_CN.txt",
+    "verify_runtime.bat"
 )) {
-    Require-Path `
-        (Join-Path $StagingRoot $required) `
-        "Runtime file"
+    Require (Join-Path $PackageDir $required) "Required runtime file"
 }
 
-# Make sure no compiled Engine is accidentally shipped from the developer PC.
+$Cudart = Get-ChildItem `
+    $PackageDir `
+    -Filter "cudart64_*.dll" `
+    -File `
+    -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+
+if (-not $Cudart) {
+    throw "cudart64_*.dll missing."
+}
+
+# Do not distribute a developer-machine TensorRT engine.
 $engines = Get-ChildItem `
-    -Path $StagingRoot `
-    -Recurse `
+    $PackageDir `
     -Filter "*.engine" `
     -File `
+    -Recurse `
     -ErrorAction SilentlyContinue
 
 if ($engines) {
-    throw "One or more .engine files are present in the package. Remove them; customer machines should build Engine from ONNX."
+    throw "Package unexpectedly contains .engine files."
 }
 
-Write-Step "9/10 Generate package manifest + SHA256 list"
+Step "7/8 Generate runtime manifest + SHA256"
 
-$Commit = Get-GitCommit
-
-$Files = Get-ChildItem `
-    -Path $StagingRoot `
-    -Recurse `
-    -File |
+$files = Get-ChildItem `
+    $PackageDir `
+    -File `
+    -Recurse |
     Sort-Object FullName
 
-$ManifestEntries = @()
-$ShaLines = @()
+$manifestFiles = @()
+$sha = @()
 
-foreach ($file in $Files) {
-    $relative = [IO.Path]::GetRelativePath(
-        $StagingRoot,
-        $file.FullName
-    ).Replace("\", "/")
+foreach ($file in $files) {
+    $relative =
+        [IO.Path]::GetRelativePath(
+            $PackageDir,
+            $file.FullName
+        ).Replace("\", "/")
 
-    $hash = Get-FileSha256 $file.FullName
+    $hash =
+        (Get-FileHash `
+            $file.FullName `
+            -Algorithm SHA256
+        ).Hash.ToLowerInvariant()
 
-    $ManifestEntries += [ordered]@{
+    $manifestFiles += [ordered]@{
         path = $relative
         bytes = $file.Length
         sha256 = $hash
     }
 
-    $ShaLines += "$hash  $relative"
+    $sha += "$hash  $relative"
 }
 
-$Manifest = [ordered]@{
+$manifest = [ordered]@{
     schemaVersion = 1
     package = $PackageName
-    createdUtc = [DateTime]::UtcNow.ToString("o")
-    configuration = $Configuration
-    runtimeIdentifier = $RuntimeIdentifier
-
-    managedSdk = "YoloDeploy.SDK.dll"
-    nativeBridge = "YoloDeploy.Native.dll"
+    tasks = @("Detect", "OBB", "Seg")
+    autoTask = $true
     modelDelivery = "ONNX"
-    enginePolicy = "Build and cache on target machine"
-    engineCache = "%LOCALAPPDATA%\YoloDeploy\EngineCache"
-
-    testSdkFrameworkDependent = $true
-    requiredDotNetRuntime = ".NET 8 Windows Desktop Runtime x64"
-    requiredTargetDriver = "Compatible NVIDIA display driver"
-
-    sourceGitCommit = $Commit
-    tensorRtRootAtBuild = $env:TENSORRT_ROOT
-    cudaPathAtBuild = $env:CUDA_PATH
-    cudnnRootAtBuild = $env:CUDNN_ROOT
-
-    files = $ManifestEntries
+    enginePolicy = "Build/cache on target GPU"
+    engineCache = "Beside ONNX: <model>.engine + <model>.engine.json"
+    fixedInput = $true
+    files = $manifestFiles
 }
 
-$Manifest |
+$manifest |
     ConvertTo-Json -Depth 8 |
     Set-Content `
-        -Path (Join-Path $StagingRoot "runtime_manifest.json") `
+        (Join-Path $PackageDir "runtime_manifest.json") `
         -Encoding UTF8
 
-$ShaLines |
+$sha |
     Set-Content `
-        -Path (Join-Path $StagingRoot "SHA256SUMS.txt") `
+        (Join-Path $PackageDir "SHA256SUMS.txt") `
         -Encoding ASCII
 
-Write-Step "10/10 Create customer directory and ZIP"
+Step "8/8 Create ZIP"
 
-if (Test-Path $PackageDir) {
-    Remove-Item $PackageDir -Recurse -Force
+if (Test-Path $ZipPath) {
+    Remove-Item $ZipPath -Force
 }
 
-Copy-Item `
-    -Path $StagingRoot `
-    -Destination $PackageDir `
-    -Recurse `
+Compress-Archive `
+    -Path $PackageDir `
+    -DestinationPath $ZipPath `
+    -CompressionLevel Optimal `
     -Force
 
-if (-not $NoZip) {
-    if (Test-Path $ZipPath) {
-        Remove-Item $ZipPath -Force
-    }
-
-    Compress-Archive `
-        -Path $PackageDir `
-        -DestinationPath $ZipPath `
-        -CompressionLevel Optimal `
-        -Force
-
-    Write-Host ""
-    Write-Host "Customer ZIP created:" -ForegroundColor Green
-    Write-Host $ZipPath -ForegroundColor Green
-    Write-Host ("ZIP size: {0:N1} MiB" -f ((Get-Item $ZipPath).Length / 1MB))
+if (Test-Path $TestPublish) {
+    Remove-Item $TestPublish -Recurse -Force
 }
 
-Remove-Item $StagingRoot -Recurse -Force
-Remove-Item $TestPublish -Recurse -Force
-
 Write-Host ""
-Write-Host "================================================================" -ForegroundColor Green
-Write-Host "YoloDeploy.SDK.Runtime publish completed successfully." -ForegroundColor Green
-Write-Host "Distribute the entire Runtime ZIP. Do NOT send only YoloDeploy.SDK.dll." -ForegroundColor Green
-Write-Host "================================================================" -ForegroundColor Green
+Write-Host "SUCCESS" -ForegroundColor Green
+Write-Host $ZipPath -ForegroundColor Green

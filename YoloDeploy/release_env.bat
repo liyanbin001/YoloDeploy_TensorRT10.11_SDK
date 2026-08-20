@@ -1,6 +1,6 @@
 ﻿@echo off
 rem ================================================================
-rem Phase 3 build environment
+rem YoloDeploy local build/release environment
 rem
 rem These values match the environment used during development.
 rem Edit them only if your local install paths change.

@@ -387,7 +387,7 @@ $Manifest =
         cameraMemoryInput = $true
         modelDelivery = "ONNX"
         enginePolicy = "Build/cache on target GPU"
-        engineCache = "%LOCALAPPDATA%\YoloDeploy\EngineCache"
+        engineCache = "Beside ONNX: <model>.engine + <model>.engine.json"
         requiresDotNet8 = $false
         files = $ManifestFiles
     }

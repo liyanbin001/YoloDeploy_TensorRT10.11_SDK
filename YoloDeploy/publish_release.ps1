@@ -312,7 +312,7 @@ New-Item -ItemType Directory -Path $ModelsDir -Force | Out-Null
 
 # Copy ONNX files if the repository contains a models/ or Models/ folder.
 # Existing .engine files are intentionally NOT shipped by default:
-# Phase 2 builds a GPU-specific engine on the target machine.
+# Build a GPU-specific engine on the target machine; do not ship developer-machine .engine files.
 $ModelSources = @(
     (Join-Path $Root "models"),
     (Join-Path $Root "Models")
@@ -348,7 +348,7 @@ $ModelReadme = @'
 6. Workspace 建议 2048 MiB
 
 不要默认把开发机生成的 .engine 当作跨 GPU 通用模型。
-程序会在目标电脑的 %LOCALAPPDATA%\YoloDeploy\EngineCache 中生成并缓存本机 Engine。
+程序会在所选 ONNX 模型所在目录生成 Engine，并在同目录写入对应 .engine.json 元数据。中文目录可用，但建议使用较短路径，避免路径过长导致 TensorRT/文件访问失败。
 '@
 Set-Content `
     -Path (Join-Path $ModelsDir "README_MODEL_CN.txt") `
@@ -464,7 +464,7 @@ Set-Content `
     -Encoding UTF8
 
 $DeployReadme = @'
-YoloDeploy Phase 3 - 目标电脑部署说明
+YoloDeploy - 目标电脑部署说明
 ======================================
 
 目标：
@@ -486,7 +486,8 @@ YoloDeploy Phase 3 - 目标电脑部署说明
 10. 第二次相同模型/GPU/参数会直接命中缓存。
 
 缓存位置：
-%LOCALAPPDATA%\YoloDeploy\EngineCache
+Engine 与 .engine.json 位于所选 ONNX 模型所在目录。
+支持中文目录；建议使用较短路径，避免完整路径过长。
 
 发布包已包含：
 - .NET 8 win-x64 self-contained 文件
@@ -592,5 +593,5 @@ else {
 Remove-Item $StagingRoot -Recurse -Force
 
 Write-Host ""
-Write-Host "Phase 3 release completed successfully." -ForegroundColor Green
+Write-Host "YoloDeploy WPF release completed successfully." -ForegroundColor Green
 Write-Host "Distribute the entire release folder or ZIP, not only YoloDeploy.App.exe." -ForegroundColor Green

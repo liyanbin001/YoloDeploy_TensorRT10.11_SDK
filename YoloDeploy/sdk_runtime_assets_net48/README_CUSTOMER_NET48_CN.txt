@@ -43,9 +43,10 @@ Microsoft Visual C++ 2015-2022 Redistributable x64（建议/通常需要）
 best.onnx
 classes.names
 
+Engine Cache：
 第一次初始化会在目标机器生成当前 GPU 专用 TensorRT Engine。
-缓存目录：
-%LOCALAPPDATA%\YoloDeploy\EngineCache
+Engine 与 .engine.json 位于 ONNX 模型所在目录。
+支持中文模型目录，但建议使用较短路径；路径过长时可能发生 Engine 构建、保存或加载失败。
 
 工业相机 BGR8：
 detector.DetectFrame(

@@ -1,57 +1,39 @@
 ﻿# YoloDeploy SDK .NET Framework 4.8 集成
 
-## 1. 合并目录
+## 1. 定位
 
-将本包 `YoloDeploy\` 目录内容合并到原仓库：
+`YoloDeploy.SDK.Net48` 用于已有的 .NET Framework 4.8 Windows 工业项目。
 
-```text
-YoloDeploy_TensorRT10.11_SDK/
-└─ YoloDeploy/
-```
+它与 `.NET 8 YoloDeploy.SDK` 并行存在，不替换主 SDK。
 
-不要删除原来的 `YoloDeploy.SDK`，Net48 与 Net8 并行存在。
+当前 Solution 已经包含：
+- `YoloDeploy.SDK.Net48`
+- `YoloDeploy.SDK.Net48.Test`
 
-## 2. 加入 VS2022 Solution
+不需要再运行 `add_net48_sdk_to_solution.bat`。
 
-运行：
-
-```text
-add_net48_sdk_to_solution.bat
-```
-
-或者手工：
-
-```powershell
-dotnet sln YoloDeploy.sln add YoloDeploy.SDK.Net48\YoloDeploy.SDK.Net48.csproj
-dotnet sln YoloDeploy.sln add YoloDeploy.SDK.Net48.Test\YoloDeploy.SDK.Net48.Test.csproj
-```
-
-## 3. 开发机要求
-
-需要安装：
+## 2. 开发机要求
 
 - Visual Studio 2022
-- .NET Framework 4.8 Developer Pack / Targeting Pack
-- .NET SDK（用于 SDK-style csproj）
-- 原项目所需 TensorRT / CUDA 开发环境
-- TENSORRT_ROOT
-- CUDA_PATH
+- .NET Framework 4.8 Developer/Targeting Pack
+- TensorRT / CUDA 开发环境
+- `TENSORRT_ROOT`
+- `CUDA_PATH`
 
-选择：
+构建配置：
 
 ```text
 Release | x64
 ```
 
-建议顺序：
+建议：
+1. Rebuild `YoloDeploy.Native`
+2. Rebuild `YoloDeploy.SDK.Net48`
+3. Rebuild `YoloDeploy.SDK.Net48.Test`
 
-1. Rebuild YoloDeploy.Native
-2. Rebuild YoloDeploy.SDK.Net48
-3. Rebuild YoloDeploy.SDK.Net48.Test
+## 3. 客户项目
 
-## 4. 客户旧项目引用
-
-客户项目必须：
+必须配置：
 
 ```text
 Target Framework: .NET Framework 4.8
@@ -59,33 +41,68 @@ Platform target: x64
 Prefer 32-bit: false
 ```
 
-添加引用：
+引用：
 
 ```text
 YoloDeploy.SDK.Net48.dll
 ```
 
-命名空间不变：
+命名空间：
 
 ```csharp
 using YoloDeploy.SDK;
 ```
 
-## 5. OBB 文件检测
+## 4. 模型与 Engine
+
+推荐客户交付：
+- `best.onnx`
+- `classes.names`
+- Net48 Runtime ZIP
+
+第一次初始化会在目标 GPU 上构建 Engine。
+
+当前缓存位置：
+
+```text
+ONNX 模型所在目录
+```
+
+例如：
+
+```text
+D:\YoloModels\ProjectA\
+├─ best.onnx
+├─ classes.names
+├─ <cache-key>.engine
+└─ <cache-key>.engine.json
+```
+
+支持中文目录，但建议完整路径保持较短。
+
+Cache Key 与 .NET 8 主线一致。
+
+Net48 元数据使用 .NET Framework 自带序列化实现；旧元数据解析失败时会判为无效缓存并重建。
+
+## 5. OBB 示例
 
 ```csharp
 ObbDetectorOptions options =
     new ObbDetectorOptions
     {
-        ModelPath = @"D:\Model\best.onnx",
-        ClassNamesPath = @"D:\Model\classes.names",
+        ModelPath =
+            @"D:\YoloModels\ProjectA\best.onnx",
+
+        ClassNamesPath =
+            @"D:\YoloModels\ProjectA\classes.names",
+
         InputWidth = 1280,
         InputHeight = 512,
         EnableFp16 = true
     };
 
 using (ObbDetector detector =
-    new ObbDetector(options))
+       new ObbDetector(options))
 {
     ObbDetectionResponse result =
         detector.Detect(
@@ -128,33 +145,21 @@ ObbDetectionResponse result =
 publish_net48_runtime.bat
 ```
 
-最终：
+输出：
 
 ```text
-dist\
-└─ YoloDeploy.SDK.Runtime.Net48.zip
+dist\YoloDeploy.SDK.Runtime.Net48.zip
 ```
 
-Net48 客户不需要安装 .NET 8 Runtime。
+Net48 客户机不需要 .NET 8 Runtime，但需要：
+- .NET Framework 4.8
+- NVIDIA GPU + 兼容驱动
+- 通常建议安装 VC++ 2015-2022 Redistributable x64
 
-## 9. Engine Cache
+## 9. 注意事项
 
-保持：
-
-```text
-%LOCALAPPDATA%\YoloDeploy\EngineCache
-```
-
-Cache Key 与主线一致。
-
-Net48 使用 .NET Framework 自带 `JavaScriptSerializer`，
-CreatedUtc 写成 ISO-8601 字符串，使元数据尽量保持与主线互操作。
-
-如果旧缓存元数据无法解析，SDK 会把缓存判定为无效并自动重建 Engine，
-不会继续加载不可信缓存。
-
-## 10. 注意
-
-Native/TensorRT 仍然是 x64，因此：
-- AnyCPU 项目建议明确改 x64。
-- x86 项目无法直接加载当前 YoloDeploy.Native.dll。
+Native/TensorRT 为 x64：
+- AnyCPU 项目建议明确改为 x64
+- x86 项目不能加载当前 `YoloDeploy.Native.dll`
+- 不建议跨 GPU 交付 `.engine`
+- 建议在目标机从 ONNX 首次构建

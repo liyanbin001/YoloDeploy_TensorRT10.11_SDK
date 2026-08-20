@@ -9,7 +9,7 @@ if errorlevel 1 exit /b %errorlevel%
 
 echo.
 echo ================================================================
-echo YoloDeploy Phase 3 - One-click Release
+echo YoloDeploy - One-click WPF Release
 echo ================================================================
 echo.
 

@@ -339,10 +339,11 @@ public partial class MainWindow : Window
         try
         {
             EngineCacheStats stats =
-                EngineCacheManager.GetStats();
+                EngineCacheManager.GetStats(
+                    OnnxPathTextBox.Text.Trim());
 
             CacheStatsTextBlock.Text =
-                $"缓存：{stats.DisplayText}";
+                $"当前模型目录缓存：{stats.DisplayText}";
         }
         catch (Exception ex)
         {
@@ -357,13 +358,14 @@ public partial class MainWindow : Window
     {
         try
         {
-            EngineCacheManager.OpenCacheFolder();
+            EngineCacheManager.OpenCacheFolder(
+                OnnxPathTextBox.Text.Trim());
         }
         catch (Exception ex)
         {
             MessageBox.Show(
                 ex.Message,
-                "打开缓存目录失败",
+                "打开模型/缓存目录失败",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -373,11 +375,31 @@ public partial class MainWindow : Window
         object sender,
         RoutedEventArgs e)
     {
+        string onnxPath =
+            OnnxPathTextBox.Text.Trim();
+
+        string? modelDirectory =
+            EngineCacheManager.GetModelDirectory(
+                onnxPath);
+
+        if (string.IsNullOrWhiteSpace(
+                modelDirectory) ||
+            !File.Exists(onnxPath))
+        {
+            MessageBox.Show(
+                "请先选择有效的 ONNX 模型。",
+                "清理 Engine 缓存",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
         var result =
             MessageBox.Show(
-                "确定清空本机全部 TensorRT Engine 缓存吗？\n\n"
-                + EngineCacheManager.CacheRoot,
-                "清空 Engine 缓存",
+                "确定清理当前 ONNX 目录中的 YoloDeploy Engine 缓存吗？\n\n"
+                + modelDirectory
+                + "\n\n仅删除带对应 .engine.json 元数据的缓存 Engine，不删除普通 ONNX/图片/手工 Engine。",
+                "清理当前模型缓存",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning);
 
@@ -387,7 +409,8 @@ public partial class MainWindow : Window
         try
         {
             if (EngineCacheManager.IsInsideCache(
-                    EnginePathTextBox.Text.Trim()))
+                    EnginePathTextBox.Text.Trim(),
+                    onnxPath))
             {
                 DestroyDetector();
 
@@ -395,19 +418,20 @@ public partial class MainWindow : Window
                     "模型尚未加载。";
             }
 
-            EngineCacheManager.ClearAll();
+            EngineCacheManager.ClearAll(
+                onnxPath);
 
             UpdateCacheStats();
             await RefreshCachePreviewAsync();
 
             StatusTextBlock.Text =
-                "Engine 缓存已清空";
+                "当前模型目录的 Engine 缓存已清理";
         }
         catch (Exception ex)
         {
             MessageBox.Show(
                 ex.Message,
-                "清空缓存失败",
+                "清理缓存失败",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }

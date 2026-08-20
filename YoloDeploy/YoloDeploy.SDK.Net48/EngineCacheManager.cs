@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -69,13 +69,6 @@ namespace YoloDeploy.SDK
 
         private static readonly JavaScriptSerializer Serializer =
             new JavaScriptSerializer();
-
-        internal static readonly string CacheRoot =
-            Path.Combine(
-                Environment.GetFolderPath(
-                    Environment.SpecialFolder.LocalApplicationData),
-                "YoloDeploy",
-                "EngineCache");
 
         internal static string ComputeSha256(
             string filePath)

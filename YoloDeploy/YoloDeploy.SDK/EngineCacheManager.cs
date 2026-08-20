@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -52,13 +52,6 @@ internal static class EngineCacheManager
 
     private static readonly JsonSerializerOptions JsonOptions =
         new() { WriteIndented = true };
-
-    internal static string CacheRoot { get; } =
-        Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.LocalApplicationData),
-            "YoloDeploy",
-            "EngineCache");
 
     internal static string ComputeSha256(string filePath)
     {
