@@ -29,7 +29,7 @@
 - Auto Task
 - Camera memory frame
 
-它由旧的 `publish_multitask_sdk_runtime.*` 收口而来。
+当前根目录只保留 `publish_sdk_runtime.*` 作为 .NET 8 SDK 正式发布入口；`publish_multitask_sdk_runtime.*` 已退出根目录，仅作为历史版本概念追溯。
 
 应保留。
 
@@ -165,3 +165,34 @@ D:\YoloModels\ProjectA\
 ```
 
 不要使用非常深的目录层级。
+## 8. 当前根目录发布入口基线
+
+当前根目录只应保留三组正式发布入口：
+
+```text
+publish_release.bat
+publish_release.ps1
+
+publish_sdk_runtime.bat
+publish_sdk_runtime.ps1
+
+publish_net48_runtime.bat
+publish_net48_runtime.ps1
+```
+
+根目录不应再出现：
+
+```text
+publish_multitask_sdk_runtime.bat
+publish_multitask_sdk_runtime.ps1
+```
+
+如本地旧分支仍存在这些文件，应归档到 `tools\legacy\`，不要重新作为正式入口。
+
+建议在提交/发布前运行：
+
+```text
+tools\verify_current_repository.ps1
+```
+
+用于检查 Engine Cache、发布入口和文档口径是否发生回退。
